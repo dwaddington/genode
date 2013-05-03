@@ -178,7 +178,8 @@ void main_parent(Dataspace_capability elf_ds)
 		printf("attach dataspace to the child at 0x%p\n", (void *)child_virt_addr);
 		*local_addr = 0x1234;
 
-		rm.attach_at(ds, child_virt_addr);
+		Rm_session_client *rm_client = &rm;
+		rm_client->attach(ds);
 
 		/* wait until our child modifies the dataspace content */
 		while (*local_addr == 0x1234);
