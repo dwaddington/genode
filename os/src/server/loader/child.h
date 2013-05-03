@@ -143,6 +143,14 @@ namespace Loader {
 				_local_rom_service.close(_binary_rom_session);
 			}
 
+			void flush_parent_services()
+			{
+				while (Service *service = _parent_services.find_by_server(0)) {
+					_parent_services.remove(service);
+					destroy(env()->heap(), service);
+				}
+			}
+
 
 			/****************************
 			 ** Child-policy interface **

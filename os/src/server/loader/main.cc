@@ -260,6 +260,13 @@ namespace Loader {
 			{
 				if (_child)
 					destroy(&_md_alloc, _child);
+
+				/*
+				 * The parent-service registry is populated by the 'Child'
+				 * on demand. Instruct the child to revert those allocations.
+				 */
+				if (_child)
+					_child->flush_parent_services();
 			}
 
 
