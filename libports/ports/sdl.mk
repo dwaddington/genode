@@ -1,7 +1,11 @@
 include ports/sdl.inc
 
-SDL_TGZ = $(SDL).tar.gz
-SDL_URL = http://www.libsdl.org/release/$(SDL_TGZ)
+SDL_TGZ      = $(SDL).tar.gz
+SDL_SIG      = $(SDL_TGZ).sig
+SDL_BASE_URL = http://www.libsdl.org/release
+SDL_URL      = $(SDL_BASE_URL)/$(SDL_TGZ)
+SDL_URL_SIG  = $(SDL_BASE_URL)/$(SDL_SIG)
+SDL_KEY      = 1528635D8053A57F77D1E08630A59377A7763BE6
 
 #
 # Interface to top-level prepare Makefile
@@ -21,8 +25,16 @@ $(CONTRIB_DIR)/$(SDL): clean-sdl
 $(DOWNLOAD_DIR)/$(SDL_TGZ):
 	$(VERBOSE)wget -c -P $(DOWNLOAD_DIR) $(SDL_URL) && touch $@
 
-$(CONTRIB_DIR)/$(SDL): $(DOWNLOAD_DIR)/$(SDL_TGZ)
-	$(VERBOSE)tar xfz $< -C $(CONTRIB_DIR) && touch $@
+$(DOWNLOAD_DIR)/$(SDL_SIG):
+	$(VERBOSE)wget -c -P $(DOWNLOAD_DIR) $(SDL_URL_SIG) && touch $@
+
+$(DOWNLOAD_DIR)/$(SDL_TGZ).verified: $(DOWNLOAD_DIR)/$(SDL_TGZ) \
+                                     $(DOWNLOAD_DIR)/$(SDL_SIG)
+	$(VERBOSE)$(SIGVERIFIER) $(DOWNLOAD_DIR)/$(SDL_TGZ) $(DOWNLOAD_DIR)/$(SDL_SIG) $(SDL_KEY)
+	$(VERBOSE)touch $@
+
+$(CONTRIB_DIR)/$(SDL): $(DOWNLOAD_DIR)/$(SDL_TGZ).verified
+	$(VERBOSE)tar xfz $(<:.verified=) -C $(CONTRIB_DIR) && touch $@
 	$(VERBOSE)rm -f $@/include/SDL_config.h
 	$(VERBOSE)patch -p0 -i src/lib/sdl/SDL_video.patch
 	$(VERBOSE)patch -d $(CONTRIB_DIR)/$(SDL) -p1 -i $(CURDIR)/src/lib/sdl/SDL_audio.patch

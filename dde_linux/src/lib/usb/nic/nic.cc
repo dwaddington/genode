@@ -32,7 +32,6 @@ extern "C" {
 static Signal_helper *_signal = 0;
 
 enum {
-	START     = 0x1, /* device flag */
 	HEAD_ROOM = 8,  /* head room in skb in bytes */
 	MAC_LEN   = 17,  /* 12 number and 6 colons */ 
 };
@@ -74,7 +73,7 @@ class Skb
 			Genode::memset(_free, 0xff, size * sizeof(_free[0]));
 
 			for (unsigned i = 0; i < _entries; i++)
-				_buf[i].start = (unsigned char *)kmalloc(buffer_size, GFP_NOIO);
+				_buf[i].start = (unsigned char *)kmalloc(buffer_size + NET_IP_ALIGN, GFP_NOIO);
 		}
 
 		sk_buff *alloc()
@@ -100,7 +99,7 @@ class Skb
 
 			/* wait until some SKBs are freed */
 			_wait_free = false;
-			PDBG("wait for free skbs ...");
+			//PDBG("wait for free skbs ...");
 			_wait_event(_wait_free);
 
 			return alloc();
@@ -165,8 +164,9 @@ class Nic_device : public Nic::Device
 			struct usbnet *dev = (usbnet *)netdev_priv(_ndev);
 
 			/* initialize skb allocators */
-			skb_rx(64, dev->rx_urb_size);
-			skb_tx(32, dev->rx_urb_size);
+			unsigned urb_cnt = dev->rx_urb_size <= 2048 ? 128 : 64;
+			skb_rx(urb_cnt, dev->rx_urb_size);
+			skb_tx(urb_cnt, dev->rx_urb_size);
 
 			if (!burst()) return;
 
@@ -294,6 +294,7 @@ int register_netdev(struct net_device *ndev)
 {
 	using namespace Genode;
 	static bool announce = false;
+	int err = -ENODEV;
 
 	Nic_device *nic = Nic_device::add(ndev);
 
@@ -305,27 +306,69 @@ int register_netdev(struct net_device *ndev)
 
 		announce = true;
 
-		ndev->state |= START;
-		int err = ndev->netdev_ops->ndo_open(ndev);
+		ndev->state |= 1 << __LINK_STATE_START;
+		netif_carrier_off(ndev);
+
+		if ((err = ndev->netdev_ops->ndo_open(ndev)))
+			return err;
+
+		if (ndev->netdev_ops->ndo_set_rx_mode)
+			ndev->netdev_ops->ndo_set_rx_mode(ndev);
+
+/*
+		if(ndev->netdev_ops->ndo_change_mtu)
+			ndev->netdev_ops->ndo_change_mtu(ndev, 4000);
+*/
 		_nic = nic;
 		env()->parent()->announce(ep_nic.manage(&root));
-
-		return err;
 	}
 
-	return -ENODEV;
+	return err;
 }
 
 
-int netif_running(const struct net_device *dev) { return dev->state & START; }
+int netif_running(const struct net_device *dev)
+{
+	return dev->state & (1 << __LINK_STATE_START);
+}
+
 int netif_device_present(struct net_device *dev) { return 1; }
 
+int netif_carrier_ok(const struct net_device *dev)
+{
+	return !(dev->state & (1 << __LINK_STATE_NOCARRIER));
+}
+
+void netif_carrier_on(struct net_device *dev)
+{
+	dev->state &= ~(1 << __LINK_STATE_NOCARRIER);
+}
+
+void netif_carrier_off(struct net_device *dev)
+{
+	dev->state |= 1 << __LINK_STATE_NOCARRIER;
+}
+
+#ifdef GENODE_NET_STAT
+	#include <nic/stat.h>
+	static Timer::Connection _timer;
+	static Nic::Measurement  _stat(_timer);
+#endif
 
 int netif_rx(struct sk_buff *skb)
 {
 	if (_nic && _nic->session()) {
 		_nic->rx(skb);
 	}
+#ifdef GENODE_NET_STAT
+	else if (_nic) {
+		try {
+		_stat.data(new (skb->data) Net::Ethernet_frame(skb->len), skb->len);
+		} catch(Net::Ethernet_frame::No_ethernet_frame) {
+			PWRN("No ether frame");
+		}
+	}
+#endif
 
 	dev_kfree_skb(skb);
 	return NET_RX_SUCCESS;
@@ -342,7 +385,8 @@ struct sk_buff *_alloc_skb(unsigned int size, bool tx)
 
 	size = (size + 3) & ~(0x3);
 
-	skb->tail     = skb->end = skb->start + size;
+	skb->end = skb->start + size;
+	skb->tail = skb->start;
 	skb->truesize = size;
 
 	return skb;
@@ -356,6 +400,16 @@ struct sk_buff *alloc_skb(unsigned int size, gfp_t priority)
 	 */
 	struct sk_buff *skb = _alloc_skb(size, false);
 	return skb;
+}
+
+struct sk_buff *netdev_alloc_skb_ip_align(struct net_device *dev, unsigned int length)
+{
+	struct sk_buff *s = _alloc_skb(length + NET_IP_ALIGN, false);
+	if (dev->net_ip_align) {
+		s->data += NET_IP_ALIGN;
+		s->tail += NET_IP_ALIGN;
+	}
+	return s;
 }
 
 
@@ -377,6 +431,8 @@ void dev_kfree_skb(struct sk_buff *skb)
 
 
 void dev_kfree_skb_any(struct sk_buff *skb) { dev_kfree_skb(skb); }
+
+void kfree_skb(struct sk_buff *skb) { dev_kfree_skb(skb); }
 
 
 /**
@@ -441,6 +497,13 @@ unsigned int skb_headroom(const struct sk_buff *skb)
 }
 
 
+int skb_tailroom(const struct sk_buff *skb)
+{
+	return skb->end - skb->tail; 
+}
+
+
+
 /**
  * Take 'len' from front
  */
@@ -488,6 +551,12 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 	c->cloned = 1;
 	c->clone  = start;
 	return c;
+}
+
+
+int skb_header_cloned(const struct sk_buff *skb)
+{
+	return skb->cloned;
 }
 
 
@@ -582,11 +651,11 @@ struct sk_buff *skb_dequeue(struct sk_buff_head *list)
  ** linux/inerrupt.h **
  **********************/
 
-static void snprint_mac(char *buf, char *mac)
+static void snprint_mac(u8 *buf, u8 *mac)
 {
 	for (int i = 0; i < ETH_ALEN; i++)
 	{
-		Genode::snprintf(&buf[i * 3], 3, "%02x", mac[i]);
+		Genode::snprintf((char *)&buf[i * 3], 3, "%02x", mac[i]);
 		if ((i * 3) < MAC_LEN)
 			buf[(i * 3) + 2] = ':';
 	}
@@ -595,11 +664,27 @@ static void snprint_mac(char *buf, char *mac)
 }
 
 
+/*************************
+ ** linux/etherdevice.h **
+ *************************/
+
+void eth_hw_addr_random(struct net_device *dev)
+{
+	random_ether_addr(dev->_dev_addr);
+}
+
+
+void eth_random_addr(u8 *addr)
+{
+	random_ether_addr(addr);
+}
+
+
 void random_ether_addr(u8 *addr)
 {
 	using namespace Genode;
-	char str[MAC_LEN + 1];
-	char fallback[] = { 0x2e, 0x60, 0x90, 0x0c, 0x4e, 0x01 };
+	u8 str[MAC_LEN + 1];
+	u8 fallback[] = { 0x2e, 0x60, 0x90, 0x0c, 0x4e, 0x01 };
 	Nic::Mac_address mac;
 
 	/* try using configured mac */
@@ -619,7 +704,11 @@ void random_ether_addr(u8 *addr)
 
 	/* use configured mac*/
 	Genode::memcpy(addr, mac.addr, ETH_ALEN);
-	snprint_mac(str, mac.addr);
+	snprint_mac(str, (u8 *)mac.addr);
 	PINF("Using configured mac: %s", str);
+
+#ifdef GENODE_NET_STAT
+	_stat.set_mac(mac.addr);
+#endif
 }
 

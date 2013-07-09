@@ -20,6 +20,7 @@ usage:
 	@echo
 	@echo "  <platform>   can be:"
 	@echo "                  'linux_x86'"
+	@echo "                  'linux_arm'"
 	@echo "                  'fiasco_x86'"
 	@echo "                  'pistachio_x86'"
 	@echo "                  'okl4_x86'"
@@ -32,6 +33,7 @@ usage:
 	@echo "                  'hw_imx31'"
 	@echo "                  'hw_imx53'"
 	@echo "                  'hw_arndale'"
+	@echo "                  'hw_rpi'"
 	@echo "                  'foc_x86_32'"
 	@echo "                  'foc_x86_64'"
 	@echo "                  'foc_pbxa9'"
@@ -71,7 +73,7 @@ BUILD_CONF_PLATFORM = $(BUILD_CONF).$(PLATFORM)
 $(BUILD_DIR)/etc:
 	@mkdir -p $@
 
-$(BUILD_DIR)/etc/build.conf::
+$(BUILD_DIR)/etc/build.conf:: $(BUILD_CONF_PLATFORM)
 	@echo "GENODE_DIR    = $(GENODE_ABS_DIR)" > $@
 	@echo 'BASE_DIR      = $$(GENODE_DIR)/base' >> $@
 
@@ -136,7 +138,7 @@ endif
 #
 # Add ARM drivers repositories to ARM build directories
 #
-ifeq ($(filter-out foc_panda foc_arndale hw_panda foc_imx53,$(PLATFORM)),)
+ifeq ($(filter-out foc_panda foc_arndale hw_panda hw_arndale foc_imx53,$(PLATFORM)),)
 $(BUILD_DIR)/etc/build.conf::
 	@cat $(BUILD_CONF).drivers_arm >> $@
 endif
@@ -160,6 +162,7 @@ foc_x86_32::
 
 foc_x86_64::
 	@echo "SPECS = genode foc_x86_64" > $(BUILD_DIR)/etc/specs.conf
+	@echo "SPECS += acpi"             >> $(BUILD_DIR)/etc/specs.conf
 
 nova_x86_32::
 	@echo "SPECS  = genode nova_x86_32" > $(BUILD_DIR)/etc/specs.conf
@@ -167,6 +170,7 @@ nova_x86_32::
 
 nova_x86_64::
 	@echo "SPECS = genode nova_x86_64" > $(BUILD_DIR)/etc/specs.conf
+	@echo "SPECS += acpi"             >> $(BUILD_DIR)/etc/specs.conf
 
 foc_pbxa9::
 	@echo "SPECS = genode foc_pbxa9" > $(BUILD_DIR)/etc/specs.conf
@@ -203,6 +207,9 @@ hw_imx53::
 
 hw_arndale::
 	@echo "SPECS = genode hw_arndale" > $(BUILD_DIR)/etc/specs.conf
+
+hw_rpi::
+	@echo "SPECS = genode hw_rpi" > $(BUILD_DIR)/etc/specs.conf
 
 lx_hybrid_x86::
 	@echo "CROSS_DEV_PREFIX =" > $(BUILD_DIR)/etc/tools.conf

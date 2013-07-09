@@ -11,6 +11,7 @@
 #
 proc install_pxe_bootloader_to_run_dir { } {
 	exec cp [genode_dir]/tool/boot/pulsar [run_dir]/boot/pulsar
+	exec cp [genode_dir]/tool/boot/bender [run_dir]/boot/bender
 }
 
 ##
@@ -69,6 +70,17 @@ proc fiasco { } {
 proc fiasco_external { } {
 	if {[fiasco] == "[pwd]/kernel/fiasco.oc/fiasco"} { return 0 }
 	return 1
+}
+
+##
+# Reset the target system via the Fiasco.OC kernel debugger
+#
+proc reset_target { {spawn_id_arg -1} } {
+	global spawn_id
+	if { $spawn_id_arg == -1 } {
+		set spawn_id_arg $spawn_id
+	}
+	send -i $spawn_id_arg "\033^^"
 }
 
 ##################################
@@ -198,7 +210,8 @@ proc build_boot_image_x86 {binaries} {
 	# Generate pulsar config file
 	#
 	set fh [open "[run_dir]/config-52-54-00-12-34-56" "WRONLY CREAT TRUNC"]
-	puts $fh " exec /fiasco/bootstrap -modaddr=0x01100000"
+	puts $fh " exec /boot/bender"
+	puts $fh " load /fiasco/bootstrap -modaddr=0x01100000"
 	puts $fh " load /fiasco/fiasco -serial_esc"
 	puts $fh " load /fiasco/sigma0"
 	puts $fh " load /genode/core"
@@ -212,17 +225,15 @@ proc build_boot_image_x86 {binaries} {
 	# Generate pulsar config file pointing to the config file above.
 	#
 	if {[info exists ::env(PXE_TFTP_DIR_BASE)] && [info exists ::env(PXE_TFTP_DIR_OFFSET)]} {
-		set len [string length $::env(PXE_TFTP_DIR_BASE)]
-		set tmp [string range [pwd] 0 $len-1]
-		# if PXE_TFTP_DIR_BASE is part of pwd (autopilot) we don't need DIR_OFFSET
-		if ([string match $tmp $::env(PXE_TFTP_DIR_BASE)]) {
-			set tftp_local_offset [string range [pwd] $len [string length [pwd]]]
-		} else {
-		    set tftp_local_offset $::env(PXE_TFTP_DIR_OFFSET)
+		exec ln -nfs "[pwd]" "$::env(PXE_TFTP_DIR_BASE)$::env(PXE_TFTP_DIR_OFFSET)"
+
+		set tftp_base ""
+		if {[get_cmd_switch --tftp-absolute]} {
+			set tftp_base $::env(PXE_TFTP_DIR_BASE)
 		}
 
 		set fh [open "$::env(PXE_TFTP_DIR_BASE)$::env(PXE_TFTP_DIR_OFFSET)/config-00-00-00-00-00-00" "WRONLY CREAT TRUNC"]
-		puts $fh " root $tftp_local_offset/[run_dir]"
+		puts $fh " root $tftp_base$::env(PXE_TFTP_DIR_OFFSET)/[run_dir]"
 		puts $fh " config config-52-54-00-12-34-56"
 		close $fh
 	}
@@ -269,6 +280,15 @@ proc build_boot_image_arm {binaries} {
 	build_boot_uimage
 
 	puts "\nboot image: [run_dir]/image.elf\n"
+
+	# set symbolic link to image.elf file in TFTP directory for PXE boot
+	if {[info exists ::env(PXE_TFTP_DIR_BASE)] &&
+	    [info exists ::env(PXE_TFTP_DIR_OFFSET)]} {
+		exec ln -sf "[pwd]/[run_dir]/image.elf" "$::env(PXE_TFTP_DIR_BASE)$::env(PXE_TFTP_DIR_OFFSET)"
+		if {[have_spec uboot]} {
+			exec ln -sf "[pwd]/[run_dir]/uImage" "$::env(PXE_TFTP_DIR_BASE)$::env(PXE_TFTP_DIR_OFFSET)/uImage"
+		}
+	}
 }
 
 
@@ -278,10 +298,32 @@ proc build_boot_image {binaries} {
 }
 
 
-proc run_genode_until {{wait_for_re forever} {timeout_value 0}} {
-	if {[is_amt_available]} {
-		spawn_amt $wait_for_re $timeout_value;
-	} else {
-		spawn_qemu $wait_for_re $timeout_value;
+proc run_genode_until {{wait_for_re forever} {timeout_value 0} {running_spawn_id -1}} {
+	#
+	# If a running_spawn_id is specified, wait for the expected output
+	#
+	if {$running_spawn_id != -1} {
+		wait_for_output $wait_for_re $timeout_value $running_spawn_id
+		return
 	}
+
+	#
+	# Try to use one of the supported backends for running the scripts
+	#
+	if {[is_amt_available]} {
+		spawn_amt $wait_for_re $timeout_value
+		return
+	}
+	if {[is_qemu_available]} {
+		spawn_qemu $wait_for_re $timeout_value
+		return
+	}
+	if {[is_serial_available]} {
+		spawn_serial $wait_for_re $timeout_value
+		return
+	}
+
+	global run_target
+	puts stderr "Error: Can't execute automatically on target '$run_target'"
+	exit -1
 }

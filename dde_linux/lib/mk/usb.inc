@@ -10,18 +10,20 @@ CONTRIB_DIR := $(REP_DIR)/contrib
 DRIVERS_DIR := $(CONTRIB_DIR)/drivers
 USB_DIR     := $(DRIVERS_DIR)/usb
 
+CC_OLEVEL = -O2
+
 #
 # The order of include-search directories is important, we need to look into
 # 'contrib' before falling back to our custom 'lx_emul.h' header.
 #
 INC_DIR += $(LIB_INC_DIR)
-INC_DIR += $(CONTRIB_DIR)/include
+INC_DIR += $(CONTRIB_DIR)/include $(CONTRIB_DIR)
 
 CC_OPT += -U__linux__ -D__KERNEL__
 CC_OPT += -DCONFIG_USB_DEVICEFS -DCONFIG_HOTPLUG -DDEBUG
 
 CC_WARN = -Wall -Wno-unused-variable -Wno-uninitialized \
-          -Wno-unused-function \
+          -Wno-unused-function -Wno-overflow 
 
 CC_C_OPT += -Wno-implicit-function-declaration -Wno-unused-but-set-variable \
             -Wno-pointer-sign
@@ -41,7 +43,7 @@ SRC_C += $(addprefix usb/host/, ehci-hcd.c)
 
 # USB hid
 SRC_C += $(addprefix hid/usbhid/, hid-core.c hid-quirks.c)
-SRC_C += $(addprefix hid/,        hid-core.c hid-input.c hid-cherry.c)
+SRC_C += $(addprefix hid/,        hid-core.c hid-generic.c hid-input.c hid-cherry.c)
 SRC_C += $(addprefix input/,      evdev.c input.c)
 
 # USB storage
