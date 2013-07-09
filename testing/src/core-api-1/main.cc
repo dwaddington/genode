@@ -1,20 +1,17 @@
 #include <base/printf.h>
 #include <base/sleep.h>
 #include <base/env.h>
-#include <base/rpc_server.h>
-#include <base/thread.h>
 #include <dataspace/client.h>
-#include <cap_session/connection.h>
 #include <cpu_session/connection.h>
 #include <rom_session/connection.h>
 #include <rm_session/connection.h>
 #include <ram_session/connection.h>
-#include <root/component.h>
-#include <util/avl_string.h>
-#include <util/misc_math.h>
-#include <util/assert.h>
-#include <base/snprintf.h>
 
+#define ASSERT(X,Y) if(!X) { PERR("Assertion failed:%s",Y); asm("int3"); }
+
+#ifndef NULL
+#define NULL (0UL)
+#endif
 
 #define KB(X) (X << 10)
 #define MB(X) (X << 20)

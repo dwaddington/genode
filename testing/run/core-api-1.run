@@ -43,10 +43,6 @@ build_boot_image {
                  core 
                  init 
                  core-api-1
-                 ld.lib.so
-                 libc.lib.so 
-                 libm.lib.so 
-                 stdcxx.lib.so
 }
 
 
